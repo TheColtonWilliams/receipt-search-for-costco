@@ -16,12 +16,13 @@ const money = (n) => (n == null || isNaN(n) ? '' : (n < 0 ? '-$' : '$') + Math.a
 // Date-only strings parse as UTC midnight (the previous day in US time zones); treat them as local.
 const day = (iso) => new Date(/^\d{4}-\d{2}-\d{2}$/.test(iso) ? `${iso}T00:00` : iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 // Costco returns a mix of ISO and US-style date strings; normalize so sorting
-// and year filtering can compare strings.
+// and year filtering can compare strings. Keep local time: toISOString() would
+// move an evening purchase to the next (UTC) day, or Dec 31 into the next year.
 const iso = (s) => {
   if (!s) return '';
   if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s;
   const d = new Date(s);
-  return isNaN(d) ? String(s) : d.toISOString();
+  return isNaN(d) ? String(s) : new Date(d - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 19);
 };
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -34,7 +35,8 @@ const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<
 const isGas = (r) =>
   /gas|fuel|car\s*wash/i.test(r.documentType || '') || (r.itemArray || []).some((it) => it.fuelUomCode);
 
-function flatten(r) {
+// key: the receipt's storage key (its barcode, or date|total when it has none).
+function flatten(r, key) {
   const items = r.itemArray || [];
   const gas = isGas(r);
   const out = [];
@@ -48,7 +50,7 @@ function flatten(r) {
     }
     const line = {
       src: gas ? 'gas' : 'warehouse',
-      ref: r.transactionBarcode,
+      ref: key,
       date: iso(r.transactionDateTime),
       warehouse: gas ? `${r.warehouseName || ''} Gas`.trim() : r.warehouseName || '',
       itemNumber: String(it.itemNumber ?? ''),
@@ -103,7 +105,7 @@ async function load() {
   applySettings();
   receipts = data.receipts || {};
   orders = data.orders || {};
-  lines = [...Object.values(receipts).flatMap(flatten), ...Object.values(orders).flatMap(flattenOrder)]
+  lines = [...Object.entries(receipts).flatMap(([k, r]) => flatten(r, k)), ...Object.values(orders).flatMap(flattenOrder)]
     .sort((a, b) => b.date.localeCompare(a.date));
 
   const nr = Object.keys(receipts).length;
@@ -244,7 +246,7 @@ function showReceipt(ref, itemNumber) {
     $('#receipt-body').innerHTML = `
       <h2>${esc(r.warehouseName || 'Costco')}</h2>
       <div class="meta">${new Date(iso(r.transactionDateTime)).toLocaleString()} · ${isGas(r) ? 'Gas station' : 'Warehouse'} · ${esc(ref)}</div>
-      ${itemTable(flatten(r), itemNumber,
+      ${itemTable(flatten(r, ref), itemNumber,
         totalRow('Subtotal', r.subTotal) + totalRow('Tax', r.taxes) + totalRow('Total', r.total) +
         totalRow('Instant savings', r.instantSavings, 'save'))}`;
   }
