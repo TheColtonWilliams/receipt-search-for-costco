@@ -229,29 +229,57 @@ function itemTable(items, itemNumber, foot) {
   </table>`;
 }
 
-function showReceipt(ref, itemNumber) {
+// Receipt or order as HTML, for the dialog and for printing. Null if unknown.
+function receiptHtml(ref, itemNumber) {
   if (ref.startsWith('o:')) {
     const o = orders[ref.slice(2)];
-    if (!o) return;
+    if (!o) return null;
     const d = o.details || {};
-    $('#receipt-body').innerHTML = `
+    return `
       <h2>Online order #${esc(o.orderNumber)}</h2>
       <div class="meta">${day(iso(o.orderPlacedDate))} · ${esc(o.status || '')}${o.details ? '' : ' · item prices unavailable'}</div>
       ${itemTable(flattenOrder(o), itemNumber,
         totalRow('Merchandise', d.merchandiseTotal) + totalRow('Shipping & handling', d.shippingAndHandling, 'opt') +
         totalRow('Discounts', d.discountAmount, 'save') + totalRow('Tax', d.uSTaxTotal1) + totalRow('Total', o.orderTotal ?? d.orderTotal))}`;
-  } else {
-    const r = receipts[ref];
-    if (!r) return;
-    $('#receipt-body').innerHTML = `
+  }
+  const r = receipts[ref];
+  if (!r) return null;
+  return `
       <h2>${esc(r.warehouseName || 'Costco')}</h2>
       <div class="meta">${new Date(iso(r.transactionDateTime)).toLocaleString()} · ${isGas(r) ? 'Gas station' : 'Warehouse'} · ${esc(ref)}</div>
       ${itemTable(flatten(r, ref), itemNumber,
         totalRow('Subtotal', r.subTotal) + totalRow('Tax', r.taxes) + totalRow('Total', r.total) +
         totalRow('Instant savings', r.instantSavings, 'save'))}`;
-  }
+}
+
+let shownRef = null; // receipt open in the dialog, for its Print button
+
+function showReceipt(ref, itemNumber) {
+  const html = receiptHtml(ref, itemNumber);
+  if (!html) return;
+  shownRef = ref;
+  $('#receipt-body').innerHTML = html;
   $('#receipt').showModal();
 }
+
+// ---------- print ----------
+
+// One receipt per page in the browser's print dialog (choose "Save as PDF").
+// Print styles only apply under body.printing, so a plain Ctrl+P still prints
+// the results table.
+function printReceipts(refs) {
+  const pages = refs.map((ref) => receiptHtml(ref)).filter(Boolean);
+  if (!pages.length) return;
+  $('#receipt').close();
+  $('#print-area').innerHTML = pages.map((h) => `<section class="print-receipt">${h}</section>`).join('');
+  document.body.classList.add('printing');
+  window.print();
+}
+
+window.addEventListener('afterprint', () => {
+  document.body.classList.remove('printing');
+  $('#print-area').innerHTML = '';
+});
 
 function downloadCsv(filename, header, rows) {
   const cell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
@@ -394,6 +422,9 @@ $('#sync').addEventListener('click', () => sync(false));
 $('#fullsync').addEventListener('click', () => sync(true));
 $('#csv').addEventListener('click', exportCsv);
 $('#csv-receipts').addEventListener('click', exportReceiptsCsv);
+// Every receipt/order in the current results, newest first (lines are sorted by date).
+$('#print-all').addEventListener('click', () => printReceipts([...new Set(current.map((l) => l.ref))]));
+$('#print-one').addEventListener('click', () => printReceipts([shownRef]));
 $('#open-settings').addEventListener('click', () => $('#settings').showModal());
 for (const k of Object.keys(DEFAULT_SETTINGS)) {
   $(`#set-${k}`).addEventListener('change', (e) => saveSetting(k, e.target.checked));

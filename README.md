@@ -23,6 +23,8 @@ Independent project, not affiliated with Costco Wholesale Corporation.
 
 Later syncs are incremental (from a month before the last sync). **Full resync** downloads everything again. If Costco's login token is missing or stale (e.g. you're on the homepage), Sync sends the Costco tab to Orders & Purchases, waits for the token, and retries.
 
+**Print receipts** prints every receipt or order in the current results, one per page; pick **Save as PDF** in the print dialog to get a PDF. **Print / Save as PDF** in a receipt's popup does the same for just that receipt. No PDF files come from Costco; these are laid out from the synced data.
+
 ### Settings (⚙)
 
 - **Auto-sync** (on by default): opening Orders & Purchases on Costco quietly runs an incremental sync, at most every 6 hours and only after your first manual sync. An open search page refreshes itself when it finishes.
