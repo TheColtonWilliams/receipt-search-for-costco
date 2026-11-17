@@ -253,15 +253,45 @@ function showReceipt(ref, itemNumber) {
   $('#receipt').showModal();
 }
 
-function exportCsv() {
+function downloadCsv(filename, header, rows) {
   const cell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-  const header = ['Date', 'Source', 'Where', 'Item #', 'Description', 'Description 2', 'Qty', 'Unit price', 'Amount', 'Savings', 'Net', 'Receipt / order'];
-  const body = current.map((l) => [l.date, l.src, l.warehouse, l.itemNumber, l.desc, l.desc2, l.qty, l.unitPrice, l.amount, l.savings,
-    l.amount == null ? '' : net(l).toFixed(2), l.ref.replace(/^o:/, '')].map(cell).join(','));
+  const body = rows.map((r) => r.map(cell).join(','));
   const blob = new Blob([[header.join(','), ...body].join('\n')], { type: 'text/csv' });
-  const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: 'costco-purchases.csv' });
+  const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: filename });
   a.click();
   URL.revokeObjectURL(a.href);
+}
+
+function exportCsv() {
+  const header = ['Date', 'Source', 'Where', 'Item #', 'Description', 'Description 2', 'Qty', 'Unit price', 'Amount', 'Savings', 'Net', 'Receipt / order'];
+  downloadCsv('costco-purchases.csv', header, current.map((l) => [l.date, l.src, l.warehouse, l.itemNumber, l.desc, l.desc2, l.qty, l.unitPrice, l.amount, l.savings,
+    l.amount == null ? '' : net(l).toFixed(2), l.ref.replace(/^o:/, '')]));
+}
+
+// One row per receipt/order with at least one line in the current results.
+// Subtotal…Total are for the whole receipt, as Costco reports them; "Matched net"
+// sums only the lines that match the current search and filters.
+function exportReceiptsCsv() {
+  const matched = new Map();
+  for (const l of current) {
+    const m = matched.get(l.ref) || { l, net: 0, priced: false };
+    m.net += net(l);
+    m.priced ||= l.amount != null;
+    matched.set(l.ref, m);
+  }
+  const header = ['Date', 'Source', 'Where', 'Receipt / order', 'Type / status', 'Subtotal', 'Shipping', 'Instant savings', 'Online discount', 'Tax', 'Total', 'Matched net'];
+  const rows = [...matched.values()].map(({ l, net: matchedNet, priced }) => {
+    const id = refId(l);
+    const m = priced ? matchedNet.toFixed(2) : '';
+    if (l.src === 'online') {
+      const o = orders[id] || {};
+      const d = o.details || {};
+      return [l.date, l.src, 'Online', id, o.status, d.merchandiseTotal, d.shippingAndHandling, '', d.discountAmount, d.uSTaxTotal1, o.orderTotal ?? d.orderTotal, m];
+    }
+    const r = receipts[l.ref] || {};
+    return [l.date, l.src, l.warehouse, id, r.transactionType, r.subTotal, '', r.instantSavings, '', r.taxes, r.total, m];
+  });
+  downloadCsv('costco-receipts.csv', header, rows);
 }
 
 // ---------- settings ----------
@@ -363,6 +393,7 @@ $('#results tbody').addEventListener('click', (e) => {
 $('#sync').addEventListener('click', () => sync(false));
 $('#fullsync').addEventListener('click', () => sync(true));
 $('#csv').addEventListener('click', exportCsv);
+$('#csv-receipts').addEventListener('click', exportReceiptsCsv);
 $('#open-settings').addEventListener('click', () => $('#settings').showModal());
 for (const k of Object.keys(DEFAULT_SETTINGS)) {
   $(`#set-${k}`).addEventListener('change', (e) => saveSetting(k, e.target.checked));
